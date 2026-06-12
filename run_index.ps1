@@ -1,5 +1,5 @@
 ﻿# Установка кодировки UTF-8 для корректного вывода кириллицы
-System.Text.ASCIIEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 <#
@@ -8,64 +8,64 @@ System.Text.ASCIIEncoding = [System.Text.Encoding]::UTF8
 #>
 
 param (
-    [string] = '',
-    [int] = 0,
-    [int] = 0,
-    [switch]
+    [string]$Filter,
+    [int]$Threads,
+    [int]$BatchSize,
+    [switch]$CleanCache
 )
 
 # Пути
- = '.\\.venv\\Scripts\\python.exe'
- = 'index_config.py'
- = 'indexing_cache.json'
+$PYTHON = ".venv/Scripts/python.exe"
+$SCRIPT = "index_config.py"
+$CACHE_FILE = "indexing_cache.json"
 
 # 1. Проверка виртуального окружения
-if (-not (Test-Path )) {
-    Write-Error 'Виртуальное окружение не найдено. Убедитесь, что папка .venv существует в каталоге проекта.'
+if (-not (Test-Path $PYTHON)) {
+    Write-Error "Виртуальное окружение не найдено. Убедитесь, что папка .venv существует в каталоге проекта."
     Exit 1
 }
 
 # 2. Очистка кэша при необходимости
-if () {
-    if (Test-Path ) {
-        Write-Host '[] Очистка файла кэша ()...' -ForegroundColor Yellow
-        Remove-Item  -Force
+if ($CleanCache) {
+    if (Test-Path $CACHE_FILE) {
+        Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Очистка файла кэша ($CACHE_FILE)...") -ForegroundColor Yellow
+        Remove-Item $CACHE_FILE -Force
     } else {
-        Write-Host '[] Файл кэша не найден, очистка не требуется.' -ForegroundColor Gray
+        Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Файл кэша не найден, очистка не требуется.") -ForegroundColor Gray
     }
 }
 
 # 3. Настройка переменных окружения
- = 'localhost,127.0.0.1'
+$env:NO_PROXY = "localhost,127.0.0.1"
 
-if () {
-     = 
-    Write-Host '[] Установлен фильтр индексации: ' -ForegroundColor Cyan
+if ($Filter) {
+    $env:INDEX_FILTER = $Filter
+    Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Установлен фильтр индексации: $Filter") -ForegroundColor Cyan
 } else {
-     = 
+    $env:INDEX_FILTER = $null
 }
 
-if ( -gt 0) {
-     = 
-    Write-Host '[] Лимит потоков CPU: ' -ForegroundColor Cyan
+if ($Threads -gt 0) {
+    $env:FASTEMBED_THREADS = $Threads
+    Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Лимит потоков CPU: $Threads") -ForegroundColor Cyan
 } else {
-     = 
+    $env:FASTEMBED_THREADS = $null
 }
 
-if ( -gt 0) {
-     = 
-    Write-Host '[] Размер батча:  чанков' -ForegroundColor Cyan
+if ($BatchSize -gt 0) {
+    $env:INDEX_BATCH_SIZE = $BatchSize
+    Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Размер батча: $BatchSize чанков") -ForegroundColor Cyan
 } else {
-     = 
+    $env:INDEX_BATCH_SIZE = $null
 }
 
-Write-Host '[] Запуск скрипта индексации...' -ForegroundColor Green
+Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Запуск скрипта индексации...") -ForegroundColor Green
 
 # 4. Запуск скрипта
-&  
+& $PYTHON $SCRIPT
 
-if ( -eq 0) {
-    Write-Host '[] Процесс индексации успешно завершен!' -ForegroundColor Green
+if ($LASTEXITCODE -eq 0) {
+    Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Процесс индексации успешно завершен!") -ForegroundColor Green
 } else {
-    Write-Warning '[] Произошла ошибка во время индексации. Код возврата: '
+    Write-Warning ("[$(Get-Date -Format 'HH:mm:ss')] Произошла ошибка во время индексации. Код возврата: $LASTEXITCODE")
 }

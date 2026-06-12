@@ -34,7 +34,7 @@ else:
     print("MCP-сервер: Запуск с локальными эмбеддингами FastEmbed.")
 
 # Создание экземпляра FastMCP
-mcp = FastMCP("1C-Configuration-Assistant")
+mcp = FastMCP("1C-VectorSpace-MCP")
 
 def get_query_embedding(text: str):
     """

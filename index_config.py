@@ -6,6 +6,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
+import psutil
+import time
+import gc
 
 # Отключаем прокси для локальных запросов к Qdrant, чтобы избежать ошибки 503 на Windows
 os.environ["NO_PROXY"] = "localhost,127.0.0.1"
@@ -26,6 +29,35 @@ CACHE_FILE = Path("indexing_cache.json")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
+MAX_RAM_PERCENT = float(os.getenv("MAX_RAM_PERCENT", "70"))
+
+def check_memory_limit(max_percent=70.0):
+    """
+    Проверяет загрузку оперативной памяти. Если она превышает лимит,
+    вызывает gc.collect() и ждет освобождения памяти.
+    """
+    wait_time = 0
+    max_wait = 30  # Ждем до 30 секунд падения ниже лимита
+    while True:
+        mem = psutil.virtual_memory()
+        if mem.percent > max_percent:
+            if mem.percent > 85.0:
+                # Критическая перегрузка — спим безусловно
+                print(f"\n[КРИТИЧЕСКАЯ НАГРУЗКА] RAM: {mem.percent}% (лимит {max_percent}%). Пауза для высвобождения ресурсов...")
+                gc.collect()
+                time.sleep(10)
+                continue
+            
+            if wait_time < max_wait:
+                print(f"\n[ВНИМАНИЕ] Загрузка RAM ({mem.percent}%) выше лимита {max_percent}%. Ожидание 5 секунд...")
+                gc.collect()
+                time.sleep(5)
+                wait_time += 5
+            else:
+                print(f"\n[ПРЕДУПРЕЖДЕНИЕ] Память не снизилась ниже {max_percent}% после ожидания. Продолжаем работу с осторожностью.")
+                break
+        else:
+            break
 
 print("Инициализация клиента Qdrant...")
 qclient = QdrantClient(url=QDRANT_URL)
@@ -47,10 +79,10 @@ else:
     else:
         import multiprocessing
         try:
-            # Используем половину логических ядер, но не меньше 1
-            fastembed_threads = max(1, multiprocessing.cpu_count() // 2)
+            # Используем половину логических ядер, но не более 2 по умолчанию (для безопасности)
+            fastembed_threads = min(2, max(1, multiprocessing.cpu_count() // 2))
         except Exception:
-            fastembed_threads = 4
+            fastembed_threads = 2
             
     print(f"Загрузка локальной модели FastEmbed: {EMBEDDING_MODEL} с лимитом потоков CPU: {fastembed_threads}...")
     encoder = TextEmbedding(model_name=EMBEDDING_MODEL, threads=fastembed_threads)
@@ -340,6 +372,7 @@ def parse_metadata_xml(filepath: Path):
     }
 
 def process_and_index():
+    check_memory_limit(MAX_RAM_PERCENT)
     print(f"Поиск файлов в {EXPORT_PATH}...")
     export_dir = Path(EXPORT_PATH)
     
@@ -377,8 +410,8 @@ def process_and_index():
 
     print(f"Всего найдено файлов для проверки: {len(all_files)}")
     
-    # Лимит чанков в одной порции для отправки в Qdrant
-    CHUNK_BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "1000"))
+    # Лимит чанков в одной порции для отправки в Qdrant (по умолчанию 100 для экономии RAM)
+    CHUNK_BATCH_SIZE = int(os.getenv("INDEX_BATCH_SIZE", "100"))
     
     # Списки на обработку во временном батче
     batch_docs = []
@@ -413,6 +446,9 @@ def process_and_index():
 
         # 2. Генерация эмбеддингов и загрузка новых точек
         if docs:
+            # Проверка памяти перед запуском тяжелой генерации
+            check_memory_limit(MAX_RAM_PERCENT)
+            
             print(f"Генерация эмбеддингов и загрузка батча из {len(docs)} чанков в Qdrant...")
             try:
                 batch_ids = [str(uuid.uuid4()) for _ in range(len(docs))]
@@ -420,7 +456,8 @@ def process_and_index():
                 if OPENAI_API_KEY:
                     batch_vectors = [get_embedding(doc) for doc in docs]
                 else:
-                    batch_vectors = [v.tolist() for v in encoder.embed(docs)]
+                    # Передаем batch_size=32 для плавной обработки FastEmbed
+                    batch_vectors = [v.tolist() for v in encoder.embed(docs, batch_size=32)]
                     
                 qclient.upsert(
                     collection_name=COLLECTION_NAME,
