@@ -20,22 +20,40 @@ from qdrant_client.http import models
 load_dotenv()
 
 # Настройки
-EXPORT_PATH = os.getenv("EXPORT_PATH", r"D:\Export\UNF")
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "1c_unf_configuration"
-CACHE_FILE = Path("indexing_cache.json")
-
-# Эмбеддинги
+# Эмбеддинги и настройки модели
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
 MAX_RAM_PERCENT = float(os.getenv("MAX_RAM_PERCENT", "70"))
 
-def check_memory_limit(max_percent=70.0):
+# Определение суффикса для разделения коллекций и кэшей
+if OPENAI_API_KEY:
+    MODEL_SUFFIX = "openai"
+elif "e5-large" in EMBEDDING_MODEL:
+    MODEL_SUFFIX = "e5_large"
+elif "MiniLM" in EMBEDDING_MODEL:
+    MODEL_SUFFIX = "minilm"
+else:
+    # Безопасный суффикс для произвольных моделей
+    clean_name = re.sub(r'[^a-zA-Z0-9]', '_', EMBEDDING_MODEL.split('/')[-1].lower())
+    MODEL_SUFFIX = clean_name
+
+EXPORT_PATH = os.getenv("EXPORT_PATH", r"D:\Export\UNF")
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+COLLECTION_NAME = f"1c_unf_configuration_{MODEL_SUFFIX}"
+CACHE_FILE = Path(f"indexing_cache_{MODEL_SUFFIX}.json")
+
+def check_memory_limit(max_percent=70.0, pbar=None):
     """
     Проверяет загрузку оперативной памяти. Если она превышает лимит,
     вызывает gc.collect() и ждет освобождения памяти.
     """
+    def log_msg(msg):
+        if pbar:
+            pbar.write(msg)
+        else:
+            print(msg)
+            
     wait_time = 0
     max_wait = 30  # Ждем до 30 секунд падения ниже лимита
     while True:
@@ -43,21 +61,22 @@ def check_memory_limit(max_percent=70.0):
         if mem.percent > max_percent:
             if mem.percent > 85.0:
                 # Критическая перегрузка — спим безусловно
-                print(f"\n[КРИТИЧЕСКАЯ НАГРУЗКА] RAM: {mem.percent}% (лимит {max_percent}%). Пауза для высвобождения ресурсов...")
+                log_msg(f"\n[КРИТИЧЕСКАЯ НАГРУЗКА] RAM: {mem.percent}% (лимит {max_percent}%). Пауза для высвобождения ресурсов...")
                 gc.collect()
                 time.sleep(10)
                 continue
             
             if wait_time < max_wait:
-                print(f"\n[ВНИМАНИЕ] Загрузка RAM ({mem.percent}%) выше лимита {max_percent}%. Ожидание 5 секунд...")
+                log_msg(f"\n[ВНИМАНИЕ] Загрузка RAM ({mem.percent}%) выше лимита {max_percent}%. Ожидание 5 секунд...")
                 gc.collect()
                 time.sleep(5)
                 wait_time += 5
             else:
-                print(f"\n[ПРЕДУПРЕЖДЕНИЕ] Память не снизилась ниже {max_percent}% после ожидания. Продолжаем работу с осторожностью.")
+                log_msg(f"\n[ПРЕДУПРЕЖДЕНИЕ] Память не снизилась ниже {max_percent}% после ожидания. Продолжаем работу с осторожностью.")
                 break
         else:
             break
+
 
 print("Инициализация клиента Qdrant...")
 qclient = QdrantClient(url=QDRANT_URL)
@@ -86,7 +105,8 @@ else:
             
     print(f"Загрузка локальной модели FastEmbed: {EMBEDDING_MODEL} с лимитом потоков CPU: {fastembed_threads}...")
     encoder = TextEmbedding(model_name=EMBEDDING_MODEL, threads=fastembed_threads)
-    vector_size = 1024
+    # Вычисляем размерность вектора динамически на основе тестового эмбеддинга
+    vector_size = len(next(encoder.embed(["dummy"])))
     print(f"Модель FastEmbed загружена. Размерность векторов: {vector_size}")
 
 # Создание коллекции и индексов
@@ -94,6 +114,23 @@ def setup_collection():
     collections = qclient.get_collections().collections
     exists = any(c.name == COLLECTION_NAME for c in collections)
     
+    recreate = False
+    if exists:
+        try:
+            collection_info = qclient.get_collection(COLLECTION_NAME)
+            vectors_config = collection_info.config.params.vectors
+            current_size = getattr(vectors_config, "size", None)
+            if current_size is not None and current_size != vector_size:
+                print(f"ВНИМАНИЕ: Размерность существующей коллекции ({current_size}) не совпадает с размерностью модели ({vector_size}).")
+                print("Пересоздаем коллекцию...")
+                recreate = True
+        except Exception as e:
+            print(f"Не удалось проверить размерность коллекции: {e}")
+            
+    if recreate:
+        qclient.delete_collection(COLLECTION_NAME)
+        exists = False
+
     if not exists:
         print(f"Коллекция '{COLLECTION_NAME}' не найдена. Создаем...")
         qclient.create_collection(
@@ -136,12 +173,16 @@ def load_cache():
             return {}
     return {}
 
-def save_cache(cache):
+def save_cache(cache, pbar=None):
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Ошибка записи кэша: {e}")
+        msg = f"Ошибка записи кэша: {e}"
+        if pbar:
+            pbar.write(msg)
+        else:
+            print(msg)
 
 # Парсинг BSL программного кода
 METHOD_START_RE = re.compile(
@@ -419,13 +460,19 @@ def process_and_index():
     batch_files_to_delete = []
     batch_cache_updates = {}
 
-    def flush_batch(docs, payloads, files_to_delete, cache_updates):
+    def flush_batch(docs, payloads, files_to_delete, cache_updates, pbar=None):
         if not files_to_delete and not docs:
             return
             
+        def log_msg(msg):
+            if pbar:
+                pbar.write(msg)
+            else:
+                print(msg)
+
         # 1. Удаление старых точек для измененных файлов
         if files_to_delete:
-            print(f"\nУдаление старых векторов для {len(files_to_delete)} файлов из Qdrant...")
+            log_msg(f"Удаление старых векторов для {len(files_to_delete)} файлов из Qdrant...")
             del_batch_size = 100
             for i in range(0, len(files_to_delete), del_batch_size):
                 batch_del = files_to_delete[i:i+del_batch_size]
@@ -442,23 +489,37 @@ def process_and_index():
                         )
                     )
                 except Exception as e:
-                    print(f"Ошибка при удалении старых векторов: {e}")
+                    log_msg(f"Ошибка при удалении старых векторов: {e}")
 
         # 2. Генерация эмбеддингов и загрузка новых точек
         if docs:
             # Проверка памяти перед запуском тяжелой генерации
-            check_memory_limit(MAX_RAM_PERCENT)
+            check_memory_limit(MAX_RAM_PERCENT, pbar=pbar)
             
-            print(f"Генерация эмбеддингов и загрузка батча из {len(docs)} чанков в Qdrant...")
+            log_msg(f"Вычисление эмбеддингов для {len(docs)} чанков...")
             try:
                 batch_ids = [str(uuid.uuid4()) for _ in range(len(docs))]
                 
                 if OPENAI_API_KEY:
-                    batch_vectors = [get_embedding(doc) for doc in docs]
+                    log_msg(f"Отправка запроса к OpenAI API ({len(docs)} чанков)...")
+                    response = openai_client.embeddings.create(
+                        input=docs,
+                        model=OPENAI_EMBEDDING_MODEL
+                    )
+                    batch_vectors = [item.embedding for item in response.data]
                 else:
-                    # Передаем batch_size=32 для плавной обработки FastEmbed
-                    batch_vectors = [v.tolist() for v in encoder.embed(docs, batch_size=32)]
+                    batch_vectors = []
+                    embeddings_gen = encoder.embed(docs, batch_size=32)
+                    for vector in tqdm(
+                        embeddings_gen,
+                        total=len(docs),
+                        desc="  ├ Вычисление векторов",
+                        leave=False,
+                        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
+                    ):
+                        batch_vectors.append(vector.tolist())
                     
+                log_msg(f"Загрузка {len(docs)} векторов в коллекцию Qdrant '{COLLECTION_NAME}'...")
                 qclient.upsert(
                     collection_name=COLLECTION_NAME,
                     points=models.Batch(
@@ -468,28 +529,38 @@ def process_and_index():
                     )
                 )
             except Exception as e:
-                print(f"Ошибка при записи векторов в Qdrant: {e}")
+                log_msg(f"Ошибка при записи векторов в Qdrant: {e}")
                 raise e
 
         # 3. Сохранение обновленного состояния кэша на диск (чекпоинт)
         if cache_updates:
             cache.update(cache_updates)
-            save_cache(cache)
-            print(f"Прогресс успешно сохранен. Обработано файлов: {len(cache)}")
+            save_cache(cache, pbar=pbar)
+            log_msg(f"Прогресс сохранен. Всего файлов в кэше: {len(cache)}")
 
         # Принудительный сбор мусора для высвобождения RAM
         import gc
         gc.collect()
 
-    # Основной цикл обработки файлов
-    for filepath in tqdm(all_files, desc="Анализ изменений в файлах"):
+    # Фильтруем файлы, которые реально изменились или отсутствуют в кэше
+    print("Проверка изменений в файлах...")
+    changed_files = []
+    for filepath in all_files:
         rel_path = str(filepath.relative_to(export_dir))
         mtime = filepath.stat().st_mtime
-        
-        # Если файл не изменился, пропускаем его
-        if cache.get(rel_path) == mtime:
-            continue
+        if cache.get(rel_path) != mtime:
+            changed_files.append((filepath, rel_path, mtime))
+            
+    if not changed_files:
+        print("Все файлы актуальны. Изменений не обнаружено.")
+        return
 
+    print(f"Найдено измененных/новых файлов для индексации: {len(changed_files)}")
+
+    # Основной цикл обработки файлов
+    pbar = tqdm(total=len(changed_files), desc="Индексация изменений")
+
+    for filepath, rel_path, mtime in changed_files:
         # Планируем удаление старых точек и обновление кэша для файла
         batch_files_to_delete.append(str(filepath))
         batch_cache_updates[rel_path] = mtime
@@ -548,16 +619,19 @@ def process_and_index():
 
         # Сбрасываем батч при превышении лимита по чанкам или файлам (чтобы не копить пустые файлы)
         if len(batch_docs) >= CHUNK_BATCH_SIZE or len(batch_files_to_delete) >= 500:
-            flush_batch(batch_docs, batch_payloads, batch_files_to_delete, batch_cache_updates)
+            flush_batch(batch_docs, batch_payloads, batch_files_to_delete, batch_cache_updates, pbar)
             batch_docs.clear()
             batch_payloads.clear()
             batch_files_to_delete.clear()
             batch_cache_updates.clear()
 
+        pbar.update(1)
+
     # Сбрасываем оставшийся хвост
     if batch_docs or batch_files_to_delete:
-        flush_batch(batch_docs, batch_payloads, batch_files_to_delete, batch_cache_updates)
+        flush_batch(batch_docs, batch_payloads, batch_files_to_delete, batch_cache_updates, pbar)
         
+    pbar.close()
     print("Индексация успешно завершена!")
 
 if __name__ == "__main__":

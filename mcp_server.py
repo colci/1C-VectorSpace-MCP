@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -12,12 +13,26 @@ from mcp.server.fastmcp import FastMCP
 # Загрузка переменных окружения
 load_dotenv()
 
-# Настройки
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "1c_unf_configuration"
+# Эмбеддинги и настройки модели
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
 OPENAI_EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"  # Для FastEmbed
+
+# Определение суффикса для разделения коллекций
+if OPENAI_API_KEY:
+    MODEL_SUFFIX = "openai"
+elif "e5-large" in EMBEDDING_MODEL:
+    MODEL_SUFFIX = "e5_large"
+elif "MiniLM" in EMBEDDING_MODEL:
+    MODEL_SUFFIX = "minilm"
+else:
+    # Безопасный суффикс для произвольных моделей
+    clean_name = re.sub(r'[^a-zA-Z0-9]', '_', EMBEDDING_MODEL.split('/')[-1].lower())
+    MODEL_SUFFIX = clean_name
+
+# Настройки Qdrant
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+COLLECTION_NAME = f"1c_unf_configuration_{MODEL_SUFFIX}"
 
 # Инициализация клиента Qdrant
 qclient = QdrantClient(url=QDRANT_URL)

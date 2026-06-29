@@ -1,18 +1,17 @@
-﻿# Установка кодировки UTF-8 для корректного вывода кириллицы
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-
-<#
+﻿<#
 .SYNOPSIS
 Скрипт для запуска индексации конфигурации 1С в векторную БД Qdrant.
 #>
-
 param (
     [string]$Filter,
     [int]$Threads,
     [int]$BatchSize,
     [switch]$CleanCache
 )
+
+# Установка кодировки UTF-8 для корректного вывода кириллицы
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Пути
 $PYTHON = ".venv/Scripts/python.exe"
@@ -27,12 +26,12 @@ if (-not (Test-Path $PYTHON)) {
 
 # 2. Очистка кэша при необходимости
 if ($CleanCache) {
+    # Удаляем все кэш-файлы для разных моделей
+    Get-ChildItem -Filter "indexing_cache_*.json" | Remove-Item -Force
     if (Test-Path $CACHE_FILE) {
-        Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Очистка файла кэша ($CACHE_FILE)...") -ForegroundColor Yellow
         Remove-Item $CACHE_FILE -Force
-    } else {
-        Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Файл кэша не найден, очистка не требуется.") -ForegroundColor Gray
     }
+    Write-Host ("[$(Get-Date -Format 'HH:mm:ss')] Файлы кэша очищены.") -ForegroundColor Yellow
 }
 
 # 3. Настройка переменных окружения
