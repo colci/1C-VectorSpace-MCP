@@ -1,0 +1,27 @@
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local virtual environments
+.venv/
+venv/
+
+# Tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets and machine-specific runtime settings
+.env
+
+# Local logs and temporary files
+logs/
+.tmp/
+tmp/
+*.tmp
+backups/
+
+# Large generated index/graph snapshots
+indexing_cache*.json
+graph_cache*.json

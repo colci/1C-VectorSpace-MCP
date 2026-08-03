@@ -1,0 +1,24 @@
+{
+  "configs": [
+    {
+      "config_id": "do_cf",
+      "config_name": "ДокументооборотКОРП",
+      "export_path": "D:\\DO\\cf",
+      "config_profile": "generic",
+      "platform_version": "8.3.27",
+      "config_kind": "main",
+      "default": true,
+      "description": "Основная конфигурация ДО"
+    },
+    {
+      "config_id": "do_cfe",
+      "config_name": "ОсновноеРасширение_ГКДоминантДляДО8",
+      "export_path": "D:\\DO\\cfe",
+      "config_profile": "generic",
+      "platform_version": "8.3.21",
+      "config_kind": "extension",
+      "base_config_id": "do_cf",
+      "description": "Расширение основной конфигурации ДО"
+    }
+  ]
+}

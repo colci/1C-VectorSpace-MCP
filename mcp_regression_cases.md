@@ -8,6 +8,39 @@ without hard-coding one specific metadata object from one database.
 
 ## How To Use
 
+Automated subset:
+
+```powershell
+.\.venv\Scripts\python.exe run_mcp_regression.py
+```
+
+List available automated cases without importing MCP runtime:
+
+```powershell
+.\.venv\Scripts\python.exe run_mcp_regression.py --list
+```
+
+Summarize selected cases by tool category:
+
+```powershell
+.\.venv\Scripts\python.exe run_mcp_regression.py --summary
+```
+
+Filter the list or live run by tool category:
+
+```powershell
+.\.venv\Scripts\python.exe run_mcp_regression.py --list --tool diagnostics
+.\.venv\Scripts\python.exe run_mcp_regression.py --tool diagnostics --fail-fast
+```
+
+Machine-readable case inventory:
+
+```powershell
+.\.venv\Scripts\python.exe run_mcp_regression.py --list --list-format json
+```
+
+The script currently covers the stabilized P0 metadata/validation-code checks, P1.1 noisy-query checks, P1.2 metadata/code convergence, diagnostics, module navigation/search, managed-form command search, event-subscription search, workflow reports, extension overlay, BSL validation, changed-file validation, post-change report, and form-structure smoke checks. The broader cases below remain a guide for manual review and future automation.
+
 For each case:
 
 1. Start with `search_metadata` or `search_code` using the natural-language query.

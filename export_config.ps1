@@ -3,8 +3,8 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 # Настройки путей (настройте под вашу систему)
-$DBPATH = "D:\Base\УНФ"
-$EXPORTPATH = "D:\Export\UNF"
+$DBPATH = "D:\Base\1C"
+$EXPORTPATH = "D:\Export\1C"
 $USER = "Администратор"
 $PASSWORD = ""
 

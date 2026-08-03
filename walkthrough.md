@@ -2,6 +2,10 @@
 
 Мы успешно создали, настроили, протестировали и оптимизировали локальную систему семантического поиска и контекстного ассистента по конфигурации 1С:УНФ на базе векторной СУБД Qdrant и MCP-сервера.
 
+> Status note, July 2026:
+> этот документ частично отражает исторический этап проекта, когда он был сфокусирован на УНФ;
+> текущая кодовая база переводится на универсальную модель конфигурации через `CONFIG_NAME`, `CONFIG_ID` и `CONFIG_PROFILE`.
+
 ---
 
 ## Что было сделано
@@ -108,7 +112,10 @@ MAX_RAM_PERCENT=70
       ],
       "env": {
         "NO_PROXY": "localhost,127.0.0.1",
-        "EXPORT_PATH": "D:\\Export\\UNF",
+        "EXPORT_PATH": "D:\\Export\\1C",
+        "CONFIG_NAME": "MyConfiguration",
+        "CONFIG_ID": "my_configuration",
+        "CONFIG_PROFILE": "generic",
         "QDRANT_URL": "http://localhost:6333"
       }
     }

@@ -1,0 +1,37 @@
+services:
+  memgraph:
+    image: memgraph/memgraph:latest
+    container_name: 1c-vectorspace-memgraph
+    restart: unless-stopped
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+      - memgraph_log:/var/log/memgraph
+    command:
+      - "--also-log-to-stderr=true"
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'RETURN 1;' | mgconsole --host 127.0.0.1 --port 7687 >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  memgraph-lab:
+    image: memgraph/lab:latest
+    container_name: 1c-vectorspace-memgraph-lab
+    restart: unless-stopped
+    profiles:
+      - ui
+    ports:
+      - "3000:3000"
+    environment:
+      QUICK_CONNECT_MG_HOST: memgraph
+      QUICK_CONNECT_MG_PORT: 7687
+    depends_on:
+      - memgraph
+
+volumes:
+  memgraph_data:
+  memgraph_log:
